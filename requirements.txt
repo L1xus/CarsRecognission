@@ -1,0 +1,6 @@
+requests
+python-dotenv
+boto3
+torchversion
+s3fs
+Pillow
