@@ -1,5 +1,7 @@
-from torchvision import datasets, transforms
 import s3fs
+from torchvision import datasets, transforms
+import torch
+from torch.utils.data import DataLoader
 import os
 from dotenv import load_dotenv
 
@@ -38,7 +40,13 @@ def classification():
     try:
         train_data = datasets.ImageFolder(s3_root + "train", transform=train_transforms)
         test_data = datasets.ImageFolder(s3_root + "test", transform=test_transforms)
-        valid_data = datasets.ImageFolder(s3_root + "valid", transform=validation_transforms)
+
+        validation_split = 0.2
+
+        valid_size = int(validation_split * len(train_data))
+        train_size = len(train_data) - valid_size
+
+        train_data, valid_data = torch.utils.data.random_split(train_data, [train_size, valid_size])
 
         print(f"Number of training samples: {len(train_data)}")
         print(f"Number of test samples: {len(test_data)}")
