@@ -1,6 +1,6 @@
-import s3fs
-from torchvision import datasets, transforms
 import torch
+from torchvision import datasets, transforms
+import s3fs
 from torch.utils.data import DataLoader
 import os
 from dotenv import load_dotenv
@@ -59,3 +59,10 @@ def classification():
     train_loader = DataLoader(train_data, batch_size=128, shuffle=True)
     test_loader = DataLoader(test_data, batch_size=32, shuffle=True)
     valid_loader = DataLoader(valid_data, batch_size=32, shuffle=True)
+
+    for images, labels in train_loader:
+        print(f"Batch size: {images.size(0)}")
+        print(f"Image shape: {images.shape}")
+        print(f"Labels: {labels}")
+        break
+
