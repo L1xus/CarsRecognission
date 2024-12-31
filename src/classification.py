@@ -88,6 +88,20 @@ def validate_model(model, valid_loader, criterion, device):
 
     return valid_loss / len(valid_loader), accuracy / len(valid_loader)
 
+def test_model(model, test_loader, device):
+    model.eval()
+    test_accuracy = 0
+
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs, 1)
+            equality = (predicted == labels).float()
+            test_accuracy += equality.mean().item()
+
+    print(f"Test Accuracy: {test_accuracy / len(test_loader):.4f}")
+
 class S3ImageDataset(Dataset):
     def __init__(self, s3_root, transform=None, aws_key=None, aws_secret=None):
         self.s3 = s3fs.S3FileSystem(anon=False, key=aws_key, secret=aws_secret)
@@ -191,6 +205,18 @@ def classification():
     valid_loss, valid_accuracy = validate_model(model, valid_loader, criterion, device)
     print(f"Validation Loss: {valid_loss:.4f}, Validation Accuracy: {valid_accuracy:.4f}")
 
+    # Save the trained model
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }, "resnet34_car_classifier_checkpoint.pth")
+
+    # Load the trained model for testing
+    model.load_state_dict(torch.load("resnet34_car_classifier.pth"))
+    model.to(device)
+
+    # Test the model
+    test_model(model, test_loader, device)
 
 if __name__ == "__main__":
     classification()
