@@ -11,8 +11,27 @@ load_dotenv()
 aws_key = os.getenv("AWS_ACCESS_KEY_ID")
 aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
 
-# Dynamically choose the device (CPU or GPU)
+# Choose the device (CPU or GPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def save_checkpoint(model, optimizer, epoch, filepath="resnet34_car_classifier_checkpoint.pth"):
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'epoch': epoch,
+    }, filepath)
+    print(f"Checkpoint saved at epoch {epoch}")
+
+
+def load_checkpoint(filepath, num_classes):
+    checkpoint = torch.load(filepath)
+    model, _, optimizer, _ = create_resnet(num_classes)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    epoch = checkpoint['epoch']
+    print(f"Checkpoint loaded: Epoch {epoch}")
+    return model, optimizer, epoch
 
 def create_resnet(num_classes):
     model = models.resnet34(pretrained=True)
@@ -30,40 +49,35 @@ def create_resnet(num_classes):
 
     # Set loss function and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
-    lrscheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=3, threshold=0.9)
+    optimizer = optim.SGD(model.fc.parameters(), lr=0.01, momentum=0.9)
+    lrscheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="max", patience=3, threshold=1e-4
+    )
 
     return model, criterion, optimizer, lrscheduler
+
 
 def train_model(model, train_loader, criterion, optimizer, device):
     model.train()
     train_loss = 0
     accuracy = 0
 
-    # Iterate over the training data
     for images, labels in train_loader:
         images, labels = images.to(device), labels.to(device)
 
-        # Zero the parameter gradients
         optimizer.zero_grad()
-
-        # Forward pass
         outputs = model(images)
-
-        # Compute the loss
         loss = criterion(outputs, labels)
         train_loss += loss.item()
 
-        # Backward pass and optimization
         loss.backward()
         optimizer.step()
 
-        # Calculate accuracy
         _, predicted = torch.max(outputs, 1)
-        equality = (predicted == labels).float()
-        accuracy += equality.mean().item()
+        accuracy += (predicted == labels).float().mean().item()
 
     return train_loss / len(train_loader), accuracy / len(train_loader)
+
 
 def validate_model(model, valid_loader, criterion, device):
     model.eval()
@@ -74,33 +88,37 @@ def validate_model(model, valid_loader, criterion, device):
         for images, labels in valid_loader:
             images, labels = images.to(device), labels.to(device)
 
-            # Forward pass
             outputs = model(images)
-
-            # Compute the loss
             loss = criterion(outputs, labels)
             valid_loss += loss.item()
 
-            # Calculate accuracy
             _, predicted = torch.max(outputs, 1)
-            equality = (predicted == labels).float()
-            accuracy += equality.mean().item()
+            accuracy += (predicted == labels).float().mean().item()
 
     return valid_loss / len(valid_loader), accuracy / len(valid_loader)
 
+
 def test_model(model, test_loader, device):
-    model.eval()
-    test_accuracy = 0
+    model.eval()  
+    test_loss = 0
+    accuracy = 0
+
+    criterion = (nn.CrossEntropyLoss()) 
 
     with torch.no_grad():
         for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
-            outputs = model(images)
-            _, predicted = torch.max(outputs, 1)
-            equality = (predicted == labels).float()
-            test_accuracy += equality.mean().item()
 
-    print(f"Test Accuracy: {test_accuracy / len(test_loader):.4f}")
+            outputs = model(images)
+
+            loss = criterion(outputs, labels)
+            test_loss += loss.item()
+
+            _, predicted = torch.max(outputs, 1)
+            accuracy += (predicted == labels).float().mean().item()
+
+    return test_loss / len(test_loader), accuracy / len(test_loader)
+
 
 class S3ImageDataset(Dataset):
     def __init__(self, s3_root, transform=None, aws_key=None, aws_secret=None):
@@ -108,115 +126,104 @@ class S3ImageDataset(Dataset):
         self.s3_root = s3_root.rstrip("/")
         self.transform = transform
 
-        # Get class labels by listing subdirectories inside the S3 root path
-        self.class_to_idx = {}
         self.image_paths = []
+        self.class_to_idx = {}
 
-        # Get the class labels (subdirectories) from S3
-        print(f"Listing classes in: {self.s3_root}")
-        for cls_name in self.s3.ls(self.s3_root):
-            if self.s3.isdir(cls_name):
-                # Normalize class names by replacing spaces with underscores
-                class_name = os.path.basename(cls_name).replace(" ", "_")
-                print(f"Found class: {class_name}")
+        print(f"Fetching class directories from: {self.s3_root}")
+        class_dirs = self.s3.ls(self.s3_root)
+        for cls_dir in class_dirs:
+            if self.s3.isdir(cls_dir):
+                class_name = os.path.basename(cls_dir).replace(" ", "_")
                 self.class_to_idx[class_name] = len(self.class_to_idx)
-
-                # Get all image paths for that class (subdirectory)
-                cls_image_paths = self.s3.glob(f"{cls_name}/**/*.jpg")
+                cls_image_paths = self.s3.glob(f"{cls_dir}/**/*.jpg")
                 self.image_paths.extend(cls_image_paths)
 
         if not self.image_paths:
-            raise ValueError(f"No images found at {self.s3_root}.")
+            raise ValueError(f"No images found at {self.s3_root}")
 
     def __len__(self):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
         image_path = self.image_paths[idx]
-        with self.s3.open(image_path, 'rb') as file:
+        with self.s3.open(image_path, "rb") as file:
             image = Image.open(file).convert("RGB")
-        
+
         if self.transform:
             image = self.transform(image)
 
-        # Get the label from the class directory name
         label = os.path.basename(os.path.dirname(image_path)).replace(" ", "_")
-        
-        # Ensure the label is in the class_to_idx dictionary
-        if label not in self.class_to_idx:
-            raise KeyError(f"Label '{label}' not found in class_to_idx.")
+        label = self.class_to_idx[label]
 
-        label = self.class_to_idx[label]  # Convert label to numerical value
         return image, label
 
 
 def classification():
-    # Define the data transformations
     train_transforms = transforms.Compose([
         transforms.Resize((244, 244)),
         transforms.RandomRotation(30),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
     test_transforms = transforms.Compose([
         transforms.Resize((244, 244)),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
-    # Data S3 path
     s3_root = "s3://carset/cars/"
 
     try:
-        # Create dataset objects
         train_data = S3ImageDataset(s3_root + "train", transform=train_transforms, aws_key=aws_key, aws_secret=aws_secret)
         test_data = S3ImageDataset(s3_root + "test", transform=test_transforms, aws_key=aws_key, aws_secret=aws_secret)
 
         validation_split = 0.2
         valid_size = int(validation_split * len(train_data))
         train_size = len(train_data) - valid_size
-
         train_data, valid_data = torch.utils.data.random_split(train_data, [train_size, valid_size])
-
-        print(f"Number of training samples: {len(train_data)}")
-        print(f"Number of test samples: {len(test_data)}")
-        print(f"Number of validation samples: {len(valid_data)}")
 
     except Exception as e:
         print(f"Error loading data from S3: {e}")
         raise
 
-    # DataLoader setup
     train_loader = DataLoader(train_data, batch_size=128, shuffle=True)
     valid_loader = DataLoader(valid_data, batch_size=32, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
 
-    # Create the model
     model, criterion, optimizer, lrscheduler = create_resnet(num_classes=196)
 
-    # Train the model
-    train_loss, train_accuracy = train_model(model, train_loader, criterion, optimizer, device)
-    print(f"Training Loss: {train_loss:.4f}, Training Accuracy: {train_accuracy:.4f}")
+    epochs = 10
+    for epoch in range(epochs):
+        print(f"Epoch {epoch + 1}/{epochs}")
 
-    # Validate the model
-    valid_loss, valid_accuracy = validate_model(model, valid_loader, criterion, device)
-    print(f"Validation Loss: {valid_loss:.4f}, Validation Accuracy: {valid_accuracy:.4f}")
+        # Train the model
+        train_loss, train_accuracy = train_model(model, train_loader, criterion, optimizer, device)
+        print(f"Training Loss: {train_loss:.4f}, Training Accuracy: {train_accuracy:.4f}")
 
-    # Save the trained model
-    torch.save({
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-    }, "resnet34_car_classifier_checkpoint.pth")
+        # Validate the model
+        valid_loss, valid_accuracy = validate_model(model, valid_loader, criterion, device)
+        print(f"Validation Loss: {valid_loss:.4f}, Validation Accuracy: {valid_accuracy:.4f}")
 
-    # Load the trained model for testing
-    model.load_state_dict(torch.load("resnet34_car_classifier.pth"))
-    model.to(device)
+        # Step the learning rate scheduler
+        lrscheduler.step(valid_accuracy)
+
+        # Save the model checkpoint
+        save_checkpoint(model, optimizer, epoch)
 
     # Test the model
-    test_model(model, test_loader, device)
+    test_loss, test_accuracy = test_model(model, test_loader, device)
+    print(f"Test Loss: {test_loss:.4f}, Test Accuracy: {test_accuracy:.4f}")
+
 
 if __name__ == "__main__":
-    classification()
+    checkpoint_path = "resnet34_car_classifier_checkpoint.pth"
+    num_classes = 196
+
+    if os.path.exists(checkpoint_path):
+        model, optimizer, epoch = load_checkpoint(checkpoint_path, num_classes)
+        print(f"Resuming training from epoch {epoch + 1}")
+    else:
+        classification()
