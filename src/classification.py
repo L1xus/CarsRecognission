@@ -190,8 +190,8 @@ def classification():
         raise
 
     train_loader = DataLoader(train_data, batch_size=128, shuffle=True)
-    valid_loader = DataLoader(valid_data, batch_size=32, shuffle=False)
-    test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
+    valid_loader = DataLoader(valid_data, batch_size=32, shuffle=True)
+    test_loader = DataLoader(test_data, batch_size=32, shuffle=True)
 
     model, criterion, optimizer, lrscheduler = create_resnet(num_classes=196)
 
