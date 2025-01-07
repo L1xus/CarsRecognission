@@ -15,6 +15,27 @@ aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def preprocess_image(image_path, transform):
+    image = Image.open(image_path).convert("RGB")
+    return transform(image).unsqueeze(0)
+
+
+def predict_image(model, image_tensor, class_to_idx):
+    model.eval()
+    with torch.no_grad():
+        outputs = model(image_tensor.to(device))
+        probabilities = torch.softmax(outputs, dim=1)
+        predicted_idx = probabilities.argmax(dim=1).item()
+        predicted_label = list(class_to_idx.keys())[list(class_to_idx.values()).index(predicted_idx)]
+        confidence = probabilities[0, predicted_idx].item()
+    return predicted_label, confidence
+
+
+def show_prediction(image_path, predicted_label, confidence):
+    image = Image.open(image_path)
+    image.show()
+    print(f"Predicted: {predicted_label}, Confidence: {confidence:.2f}")
+
 def save_checkpoint(model, optimizer, epoch, filepath="resnet34_car_classifier_checkpoint.pth"):
     torch.save({
         'model_state_dict': model.state_dict(),
@@ -221,9 +242,33 @@ def classification():
 if __name__ == "__main__":
     checkpoint_path = "resnet34_car_classifier_checkpoint.pth"
     num_classes = 196
+    image_path = "e39.jpg"
 
+    # Load the class to index mapping
+    s3_root = "s3://carset/cars/train"
+    dataset = S3ImageDataset(s3_root, transform=None, aws_key=aws_key, aws_secret=aws_secret)
+    class_to_idx = dataset.class_to_idx
+
+    # Load the trained model
     if os.path.exists(checkpoint_path):
-        model, optimizer, epoch = load_checkpoint(checkpoint_path, num_classes)
-        print(f"Resuming training from epoch {epoch + 1}")
+        model, _, _ = load_checkpoint(checkpoint_path, num_classes)
+        model.to(device)
+
+        # Define image transformations
+        transform = transforms.Compose([
+            transforms.Resize((244, 244)),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+        # Preprocess the image
+        image_tensor = preprocess_image(image_path, transform)
+
+        # Predict the image class
+        predicted_label, confidence = predict_image(model, image_tensor, class_to_idx)
+
+        # Show the prediction
+        show_prediction(image_path, predicted_label, confidence)
     else:
-        classification()
+        print("No checkpoint found. Please train the model first.")

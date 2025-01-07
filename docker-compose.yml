@@ -6,4 +6,4 @@ services:
       - "4000:80"
     volumes:
       - .:/app
-    command: python main.py
+    command: python src/classification.py
