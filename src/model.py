@@ -21,12 +21,14 @@ def create_resnet(num_classes):
 
     return model, criterion, optimizer, lrscheduler
 
-def save_checkpoint(model, optimizer, epoch, filepath):
+def save_checkpoint(model, optimizer, epoch, class_to_idx, filepath):
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'epoch': epoch,
+        'class_to_idx': class_to_idx,
     }, filepath)
+
     print(f"Checkpoint saved at epoch {epoch}")
 
 def load_checkpoint(filepath, num_classes):
@@ -35,6 +37,7 @@ def load_checkpoint(filepath, num_classes):
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
+    class_to_idx = checkpoint['class_to_idx']
     print(f"Checkpoint loaded: Epoch {epoch}")
 
-    return model, optimizer, epoch
+    return model, optimizer, epoch, class_to_idx
