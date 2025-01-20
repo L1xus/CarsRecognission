@@ -33,7 +33,7 @@ if __name__ == "__main__":
         train_size = len(train_data) - valid_size
         train_data, valid_data = torch.utils.data.random_split(train_data, [train_size, valid_size])
 
-        train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
+        train_loader = DataLoader(train_data, batch_size=128, shuffle=True)
         valid_loader = DataLoader(valid_data, batch_size=32, shuffle=False)
         test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
 

@@ -9,5 +9,4 @@ AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 S3_ROOT = "s3://carset/cars/"
 CHECKPOINT_PATH = "resnet34_car_classifier_checkpoint.pth"
 NUM_CLASSES = 196
-BATCH_SIZE = 128
 EPOCHS = 10
